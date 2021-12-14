@@ -558,7 +558,9 @@ cdef class ArrheniusBM(KineticsModel):
         """
         cdef double w0, E0
         E0 = self._E0.value_si
-        if dHrxn < -4 * self._E0.value_si:
+        if E0 < 0:
+            return E0
+        elif dHrxn < -4 * self._E0.value_si:
             return 0.0
         elif dHrxn > 4 * self._E0.value_si:
             return dHrxn
