@@ -612,10 +612,9 @@ cdef class ArrheniusBM(KineticsModel):
                 out = Ea - (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) * (Vp - 2 * w0 + dHrxn) / (Vp * Vp - (2 * w0) * (2 * w0) + dHrxn * dHrxn)
                 return out
 
-            if abs(dHrxn) > 4 * w0 / 10.0:
-                E0 = w0 / 10.0
-            else:
-                E0 = fsolve(kfcn, w0 / 10.0)[0]
+            # Use BEP with alpha = 0.5 for inital guess of E0
+            E0 = rxn.kinetics._Ea.value_si - 0.5 * rxn.get_enthalpy_of_reaction(298.15)
+            E0 = fsolve(kfcn, E0)[0]
 
             self.Tmin = rxn.kinetics.Tmin
             self.Tmax = rxn.kinetics.Tmax
@@ -627,22 +626,25 @@ cdef class ArrheniusBM(KineticsModel):
                 dHrxn = xs[:,1]
                 Vp = 2 * w0 * (2 * w0 + 2 * E0) / (2 * w0 - 2 * E0)
                 Ea = (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) * (Vp - 2 * w0 + dHrxn) / (Vp * Vp - (2 * w0) * (2 * w0) + dHrxn * dHrxn)
-                Ea = np.where(dHrxn< -4.0*E0, 0.0, Ea)
-                Ea = np.where(dHrxn > 4.0*E0, dHrxn, Ea)
                 return lnA + np.log(T ** n * np.exp(-Ea / (8.314 * T)))
               
             # get (T,dHrxn(T)) -> (Ln(k) mappings
             xdata = []
             ydata = []
             sigmas = []
+            E0 = 0.0
             for rxn in rxns:
                 # approximately correct the overall uncertainties to std deviations
                 s = rank_accuracy_map[rxn.rank].value_si/2.0
+                # Use BEP with alpha = 0.5 for inital guess of E0
+                E0 += rxn.kinetics._Ea.value_si - 0.5 * rxn.get_enthalpy_of_reaction(298.15)
                 for T in Ts:
                     xdata.append([T, rxn.get_enthalpy_of_reaction(T)])
                     ydata.append(np.log(rxn.get_rate_coefficient(T)))
 
                     sigmas.append(s / (8.314 * T))
+            # Use the average of the E0s as intial guess
+            E0 /= len(rxns)
 
             xdata = np.array(xdata)
             ydata = np.array(ydata)
@@ -654,7 +656,7 @@ cdef class ArrheniusBM(KineticsModel):
             while boo:
                 boo = False
                 try:
-                    params = curve_fit(kfcn, xdata, ydata, sigma=sigmas, p0=[1.0, 1.0, w0 / 10.0], xtol=xtol, ftol=ftol)
+                    params = curve_fit(kfcn, xdata, ydata, sigma=sigmas, p0=[1.0, 1.0, E0], xtol=xtol, ftol=ftol)
                 except RuntimeError:
                     if xtol < 1.0:
                         boo = True
