@@ -556,18 +556,20 @@ cdef class ArrheniusBM(KineticsModel):
         Return the activation energy in J/mol corresponding to the given
         enthalpy of reaction `dHrxn` in J/mol.
         """
-        cdef double w0, E0
+        cdef double w0, E0, Ea
         E0 = self._E0.value_si
-        if E0 < 0:
-            return E0
-        elif dHrxn < -4 * self._E0.value_si:
-            return 0.0
-        elif dHrxn > 4 * self._E0.value_si:
-            return dHrxn
-        else:
-            w0 = self._w0.value_si
-            Vp = 2 * w0 * (2 * w0 + 2 * E0) / (2 * w0 - 2 * E0)
-            return (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) ** 2 / (Vp ** 2 - (2 * w0) ** 2 + dHrxn ** 2)
+        w0 = self._w0.value_si
+        Vp = 2 * w0 * (2 * w0 + 2 * E0) / (2 * w0 - 2 * E0)
+        Ea = (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) ** 2 / (Vp ** 2 - (2 * w0) ** 2 + dHrxn ** 2)
+        if E0 > 0:
+            if dHrxn < 0.0 and Ea < 0.0:
+                Ea = 0.0
+            elif dHrxn > 0.0 and Ea < dHrxn:
+                Ea = dHrxn
+        elif Ea < 0 and Ea < E0:
+            #Calculated Ea (from BM) is negative AND below than the intrinsic E0
+            Ea = min(0.0, E0)
+        return Ea
 
     cpdef Arrhenius to_arrhenius(self, double dHrxn):
         """
@@ -598,6 +600,7 @@ cdef class ArrheniusBM(KineticsModel):
             #estimate w0
             w0s = get_w0s(recipe, rxns)
             w0 = sum(w0s) / len(w0s)
+            self.w0 = (w0 * 0.001, 'kJ/mol')
 
         if len(rxns) == 1:
             T = 1000.0
@@ -612,8 +615,10 @@ cdef class ArrheniusBM(KineticsModel):
                 out = Ea - (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) * (Vp - 2 * w0 + dHrxn) / (Vp * Vp - (2 * w0) * (2 * w0) + dHrxn * dHrxn)
                 return out
 
-            # Use BEP with alpha = 0.5 for inital guess of E0
-            E0 = rxn.kinetics._Ea.value_si - 0.5 * rxn.get_enthalpy_of_reaction(298.15)
+            # Use BEP with alpha = 0.1 for inital guess of E0
+            E0 = rxn.kinetics._Ea.value_si - 0.1 * rxn.get_enthalpy_of_reaction(298)
+            if E0 < 0:
+                E0 = w0 / 10.0
             E0 = fsolve(kfcn, E0)[0]
 
             self.Tmin = rxn.kinetics.Tmin
@@ -624,9 +629,13 @@ cdef class ArrheniusBM(KineticsModel):
             def kfcn(xs, lnA, n, E0):
                 T = xs[:,0]
                 dHrxn = xs[:,1]
-                Vp = 2 * w0 * (2 * w0 + 2 * E0) / (2 * w0 - 2 * E0)
-                Ea = (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) * (Vp - 2 * w0 + dHrxn) / (Vp * Vp - (2 * w0) * (2 * w0) + dHrxn * dHrxn)
-                return lnA + np.log(T ** n * np.exp(-Ea / (8.314 * T)))
+                self.E0 = (E0, 'J/mol')
+                Ea = np.array([self.get_activation_energy(dHrxn[i]) for i in range(len(dHrxn))])
+                #Vp = 2 * w0 * (2 * w0 + 2 * E0) / (2 * w0 - 2 * E0)
+                #Ea = (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) * (Vp - 2 * w0 + dHrxn) / (Vp * Vp - (2 * w0) * (2 * w0) + dHrxn * dHrxn)
+                #Ea = np.where(dHrxn< -4.0*E0, 0.0, Ea)
+                #Ea = np.where(dHrxn > 4.0*E0, dHrxn, Ea
+                return lnA + np.log(T ** n * np.exp(-Ea / (constants.R * T)))
               
             # get (T,dHrxn(T)) -> (Ln(k) mappings
             xdata = []
@@ -637,14 +646,14 @@ cdef class ArrheniusBM(KineticsModel):
                 # approximately correct the overall uncertainties to std deviations
                 s = rank_accuracy_map[rxn.rank].value_si/2.0
                 # Use BEP with alpha = 0.5 for inital guess of E0
-                E0 += rxn.kinetics._Ea.value_si - 0.5 * rxn.get_enthalpy_of_reaction(298.15)
+                E0 += max(rxn.kinetics._Ea.value_si - 0.1 * rxn.get_enthalpy_of_reaction(298), 0.0)
                 for T in Ts:
-                    xdata.append([T, rxn.get_enthalpy_of_reaction(T)])
+                    xdata.append([T, rxn.get_enthalpy_of_reaction(298.15)])
                     ydata.append(np.log(rxn.get_rate_coefficient(T)))
-
-                    sigmas.append(s / (8.314 * T))
+                    sigmas.append(s / (constants.R * T))
             # Use the average of the E0s as intial guess
             E0 /= len(rxns)
+            E0 = max(E0, w0 / 10.0)
 
             xdata = np.array(xdata)
             ydata = np.array(ydata)
@@ -678,8 +687,7 @@ cdef class ArrheniusBM(KineticsModel):
         self.A = (A, A_units[order])
 
         self.n = n
-        self.w0 = (w0, 'J/mol')
-        self.E0 = (E0, 'J/mol')
+        self.E0 = (E0 * 0.001, 'kJ/mol')
 
         return self
 
