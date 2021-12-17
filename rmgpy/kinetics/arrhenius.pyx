@@ -562,9 +562,9 @@ cdef class ArrheniusBM(KineticsModel):
         Vp = 2 * w0 * (2 * w0 + 2 * E0) / (2 * w0 - 2 * E0)
         Ea = (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) ** 2 / (Vp ** 2 - (2 * w0) ** 2 + dHrxn ** 2)
         if E0 > 0:
-            if (dHrxn < 0.0 and Ea < 0.0) or (dHrxn < -4 * self._E0.value_si):
+            if (dHrxn < 0.0 and Ea < 0.0) or (dHrxn < -4 * E0):
                 Ea = 0.0
-            elif (dHrxn > 0.0 and Ea < dHrxn) or (dHrxn > 4 * self._E0.value_si):
+            elif (dHrxn > 0.0 and Ea < dHrxn) or (dHrxn > 4 * E0):
                 Ea = dHrxn
         elif Ea < 0 and Ea < E0:
             #Calculated Ea (from BM) is negative AND below than the intrinsic E0
@@ -619,16 +619,14 @@ cdef class ArrheniusBM(KineticsModel):
         for rxn in rxns:
             # approximately correct the overall uncertainties to std deviations
             s = rank_accuracy_map[rxn.rank].value_si/2.0
-            # Use BEP with alpha = 0.5 for inital guess of E0
-            # E0 += rxn.kinetics._Ea.value_si - 0.25 * rxn.get_enthalpy_of_reaction(298)
-            E0 += rxn.kinetics._Ea.value_si - 0.1 * rxn.get_enthalpy_of_reaction(298)
+            # Use BEP with alpha = 0.25 for inital guess of E0
+            E0 += rxn.kinetics._Ea.value_si - 0.25 * rxn.get_enthalpy_of_reaction(298)
             lnA += np.log(rxn.kinetics.A.value_si)
             n += rxn.kinetics.n.value_si
-            for perturbation in (-4184.0, 0.0, 4184.0): # +/- 1 kcal/mol
-                for T in Ts:
-                    xdata.append([T, rxn.get_enthalpy_of_reaction(298) + perturbation])
-                    ydata.append(np.log(rxn.get_rate_coefficient(T)))
-                    sigmas.append(s / (constants.R * T))
+            for T in Ts:
+                xdata.append([T, rxn.get_enthalpy_of_reaction(298)])
+                ydata.append(np.log(rxn.get_rate_coefficient(T)))
+                sigmas.append(s / (constants.R * T))
         # Use the average of the E0s as intial guess
         E0 /= len(rxns)
         lnA /= len(rxns)
@@ -655,7 +653,7 @@ cdef class ArrheniusBM(KineticsModel):
                     if attempts > 0:
                         self.w0.value_si *= 1.25
                     attempts += 1
-                    E0 = self.w0.value_si/10.0
+                    E0 = self.w0.value_si / 10.0
             except RuntimeError:
                 if xtol < 1.0:
                     boo = True
