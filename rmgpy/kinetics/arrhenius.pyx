@@ -559,16 +559,18 @@ cdef class ArrheniusBM(KineticsModel):
         cdef double w0, E0, Ea
         E0 = self._E0.value_si
         w0 = self._w0.value_si
-        Vp = 2 * w0 * (2 * w0 + 2 * E0) / (2 * w0 - 2 * E0)
-        Ea = (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) ** 2 / (Vp ** 2 - (2 * w0) ** 2 + dHrxn ** 2)
-        if E0 > 0:
+        if E0 < 0:
+            if dHrxn > 0:
+                Ea = dHrxn
+            else:
+                Ea = min(0.0, E0)
+        else:
+            Vp = 2 * w0 * (2 * w0 + 2 * E0) / (2 * w0 - 2 * E0)
+            Ea = (w0 + dHrxn / 2.0) * (Vp - 2 * w0 + dHrxn) ** 2 / (Vp ** 2 - (2 * w0) ** 2 + dHrxn ** 2)
             if (dHrxn < 0.0 and Ea < 0.0) or (dHrxn < -4 * E0):
                 Ea = 0.0
             elif (dHrxn > 0.0 and Ea < dHrxn) or (dHrxn > 4 * E0):
                 Ea = dHrxn
-        elif Ea < 0 and Ea < E0:
-            #Calculated Ea (from BM) is negative AND below than the intrinsic E0
-            Ea = min(0.0, E0)
         return Ea
 
     cpdef Arrhenius to_arrhenius(self, double dHrxn):
