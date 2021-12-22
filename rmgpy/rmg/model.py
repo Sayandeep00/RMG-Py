@@ -1437,13 +1437,6 @@ class CoreEdgeReactionModel:
         AND all of its products are in the list of core species).
         """
         if rxn not in self.core.reactions:
-            if isinstance(rxn, PDepReaction):
-                if np.isnan(rxn.get_rate_coefficient(1000,1e5)):
-                    # this reaction kinetics are undefined, dont add to the core
-                    logging.warning(f"pdep reaction {rxn} has invalid kinetics and will not be added to the core: {rxn.kinetics}")
-                    if rxn in self.edge.reactions:
-                        self.edge.reactions.remove(rxn)
-                    return False
             self.core.reactions.append(rxn)
             if not self.core.phase_system.in_nose:
                 rms_species_list = self.core.phase_system.get_rms_species_list()
@@ -1890,6 +1883,9 @@ class CoreEdgeReactionModel:
         while index < core_reaction_count:
             reaction = self.core.reactions[index]
             if isinstance(reaction, PDepReaction):
+                if np.isnan(reaction.kinetics.get_rate_coefficient(1000.0,1e5)):
+                    # this reaction kinetics are undefined, dont add to the core
+                    logging.warning(f"pdep reaction {reaction} has invalid kinetics and will be removed from the core: {reaction.kinetics}")
                 for reaction2 in self.core.reactions[index + 1:]:
                     if isinstance(reaction2,
                                   PDepReaction) and reaction.reactants == reaction2.products and reaction.products == reaction2.reactants:
